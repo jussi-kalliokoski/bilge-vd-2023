@@ -1,0 +1,297 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="utf-8">
+    <meta http-equiv="Content-Type" content="text/html; charset=utf-8">
+    <title>Bilge!!!</title>
+    <style>
+html, body {
+    padding: 0;
+    margin: 0;
+    width: 100%;
+    height: 100%;
+}
+    </style>
+</head>
+<body>
+    <script type="module">
+console.log("I love you so much, baby! <3");
+
+class Renderer {
+    #world;
+    #container;
+    #canvas;
+    #spriteTextures;
+    #maxSpriteCount = 16384;
+    #spriteSize = 256;
+    #spritePositions = new Uint32Array(this.#maxSpriteCount * 2);
+    #spriteAngles = new Float64Array(this.#maxSpriteCount);
+    #spriteScales = new Float64Array(this.#maxSpriteCount);
+    #spriteOpacities = new Float64Array(this.#maxSpriteCount);
+    #sprites = new Uint8Array(this.#maxSpriteCount);
+
+    constructor(world, container) {
+        this.#world = world;
+        this.#container = container;
+        this.#canvas = document.createElement("canvas");
+        this.#prepareTextures();
+        this.#container.appendChild(this.#canvas);
+    }
+
+    #prepareTextures() {
+        this.#spriteTextures = [];
+        const emojis = [
+            "♥️",
+            "😍",
+        ];
+        for (let emoji of emojis) {
+            const canvas = document.createElement("canvas");
+            canvas.width = this.#spriteSize;
+            canvas.height = this.#spriteSize;
+            const { width: w, height: h } = canvas;
+            const context = canvas.getContext("2d");
+            const padding = 2;
+            context.font = `${h - padding * 2}px serif`;
+            context.textAlign = "center";
+            context.textBaseline = "middle";
+            context.fillText(emoji, w / 2, h / 2);
+            this.#spriteTextures.push(canvas);
+        }
+    }
+
+    resize() {
+        this.#canvas.style.width = "100%";
+        this.#canvas.style.height = "100%";
+        this.#canvas.width = Math.floor(this.#canvas.offsetWidth * window.devicePixelRatio);
+        this.#canvas.height = Math.floor(this.#canvas.offsetHeight * window.devicePixelRatio);
+    }
+
+    update(deltaTime) {
+        const context = this.#canvas.getContext("2d");
+        context.fillStyle = "white";
+        context.globalAlpha = 1.0;
+        context.fillRect(0, 0, this.#canvas.width, this.#canvas.height);
+        const so = this.#spriteSize / Math.min(this.#canvas.width, this.#canvas.height);
+        for (let i = 0; i < this.#maxSpriteCount; i++) {
+            const sx = this.#spritePositions[i * 2 + 0];
+            const sy = this.#spritePositions[i * 2 + 1];
+            const ss = this.#spriteScales[i] * so;
+            const sw = this.#spriteSize * ss;
+            const sh = this.#spriteSize * ss;
+            const sa = this.#spriteAngles[i];
+            const st = this.#spriteTextures[this.#sprites[i]];
+            context.save();
+            context.translate(sx, sy);
+            context.rotate(sa);
+            context.globalAlpha = this.#spriteOpacities[i];
+            context.drawImage(st, -sw / 2, -sh / 2, sw, sh);
+            context.restore();
+        }
+    }
+
+    getWidth() {
+        return this.#canvas.width;
+    }
+
+    getHeight() {
+        return this.#canvas.height;
+    }
+
+    getSpriteCount() {
+        return this.#maxSpriteCount;
+    }
+
+    setSpritePosition(index, x, y) {
+        this.#spritePositions[index * 2 + 0] = x;
+        this.#spritePositions[index * 2 + 1] = y;
+    }
+
+    randomizeSprite(index) {
+        this.#sprites[index] = Math.floor(Math.random() * this.#spriteTextures.length);
+    }
+
+    setSpriteAngle(index, angle) {
+        this.#spriteAngles[index] = angle;
+    }
+
+    setSpriteScale(index, scale) {
+        this.#spriteScales[index] = scale;
+    }
+
+    setSpriteOpacity(index, opacity) {
+        this.#spriteOpacities[index] = opacity;
+    }
+}
+
+class Physics {
+    #world;
+    #availablePositions;
+    #positions;
+    #angles;
+    #momentums;
+    #timers;
+    #timerOffsets;
+    #velocities;
+    #friction = 0.1;
+    #epsilon = 0.001;
+    #subsampling = 8;
+    #textLines = `
+Happy Valentine's Day
+Biliboogiebits!
+Seni çok seviyorum! <3
+    `.trim().split("\n");
+
+    constructor(world) {
+        this.#world = world;
+    }
+
+    resize() {
+        const canvas = document.createElement("canvas");
+        canvas.width = Math.floor(this.#world.renderer.getWidth() / this.#subsampling);
+        canvas.height = Math.floor(this.#world.renderer.getHeight() / this.#subsampling);
+        const { width: w, height: h } = canvas;
+        const context = canvas.getContext("2d");
+        let fontSize = h;
+        context.font = `${fontSize}px sans-serif`;
+        const longestLine = this.#textLines.map(l => context.measureText(l).width).reduce((a, b) => Math.max(a, b), 0);
+        const p = 1.1;
+        const overfitX = longestLine / w * p;
+        const overfitY = p * this.#textLines.length;
+        fontSize = Math.floor(fontSize / Math.max(overfitX, overfitY));
+        context.font = `${fontSize}px sans-serif`;
+        context.textAlign = "center";
+        context.textBaseline = "middle";
+        context.fillStyle = "white";
+        context.fillRect(0, 0, w,  h);
+        context.fillStyle = "black";
+        for (let i = 0; i < this.#textLines.length; i++) {
+            context.fillText(this.#textLines[i], Math.floor(w / 2), Math.floor(h / this.#textLines.length * (0.5 + i)));
+        }
+        const availablePositions = [];
+        const imageData = context.getImageData(0, 0, w, h);
+        const pixels = new Uint8Array(imageData.data.buffer);
+        const blank = (x, y) => x < 0 || x >= w || y < 0 || y >= h || pixels[(y * w + x) * 4] >= 128;
+        for (let i = 0; i < pixels.length / 4; i++) {
+            let x = i % w;
+            let y = Math.floor(i / w);
+            if (blank(x, y)) {
+                continue;
+            }
+            let hasBlankNeighbour = false;
+            hasBlankNeighbour ||= blank(x - 1, y);
+            hasBlankNeighbour ||= blank(x + 1, y);
+            hasBlankNeighbour ||= blank(x, y - 1);
+            hasBlankNeighbour ||= blank(x, y + 1);
+            if (!hasBlankNeighbour) {
+                continue;
+            }
+            availablePositions.push(x / w);
+            availablePositions.push(y / h);
+        }
+        this.#availablePositions = new Float64Array(availablePositions);
+        const l = this.#world.renderer.getSpriteCount();
+        this.#positions = new Float64Array(l * 2);
+        this.#timers = new Float64Array(l);
+        this.#timerOffsets = new Float64Array(l);
+        this.#angles = new Float64Array(l);
+        this.#momentums = new Float64Array(l * 2);
+        this.#velocities = new Float64Array(l * 2);
+
+        for (let i = 0; i < l; i++) {
+            this.#reset(i);
+        }
+    }
+
+    update(deltaTime) {
+        const l = this.#world.renderer.getSpriteCount();
+        const w = this.#world.renderer.getWidth();
+        const h = this.#world.renderer.getHeight();
+        for (let i = 0; i < l; i++) {
+            if (this.#timerOffsets[i] >= this.#timers[i]) {
+                this.#reset(i);
+            }
+            this.#timerOffsets[i] = Math.min(this.#timers[i], this.#timerOffsets[i] + deltaTime);
+            const tp = this.#timerOffsets[i] / this.#timers[i];
+            const a = this.#momentums[i * 2 + 0];
+            const m = easeIn(1 - tp) * this.#momentums[i * 2 + 1];
+            this.#angles[i] += a * deltaTime / 1000;
+            this.#positions[i * 2 + 0] += this.#velocities[i * 2 + 0] * deltaTime / 900;
+            this.#positions[i * 2 + 1] += this.#velocities[i * 2 + 1] * deltaTime / 900;
+            this.#velocities[i * 2 + 0] = Math.cos(a) * m;
+            this.#velocities[i * 2 + 1] = Math.sin(a) * m;
+            this.#world.renderer.setSpritePosition(i, this.#positions[i * 2 + 0] * w, this.#positions[i * 2 + 1] * h);
+            this.#world.renderer.setSpriteAngle(i, this.#angles[i]);
+            this.#world.renderer.setSpriteScale(i, 0.5 * flash(tp, 0.7, 0.8));
+            this.#world.renderer.setSpriteOpacity(i, flash(tp, 0.1, 0.9));
+        }
+    }
+
+    #reset(index) {
+        const offset = Math.floor(Math.random() * this.#availablePositions.length / 2);
+        this.#positions[index * 2 + 0] = this.#availablePositions[offset * 2 + 0];
+        this.#positions[index * 2 + 1] = this.#availablePositions[offset * 2 + 1];
+        this.#timers[index] = 2000 + Math.random() * 5000;
+        this.#timerOffsets[index] = 0;
+        this.#angles[index] = Math.random() * Math.PI * 2;
+        this.#momentums[index * 2 + 0] = Math.random() * Math.PI * 2;
+        this.#momentums[index * 2 + 1] = (this.#epsilon * 10 + (Math.random() - this.#epsilon * 10)) / 1000;
+        this.#velocities[index * 2 + 0] = Math.cos(this.#momentums[index * 2 + 0]) * this.#momentums[index * 2 + 1];
+        this.#velocities[index * 2 + 1] = Math.sin(this.#momentums[index * 2 + 0]) * this.#momentums[index * 2 + 1];
+        this.#world.renderer.randomizeSprite(index);
+    }
+}
+
+function flash(x, sustainStart, sustainEnd) {
+    if (x < sustainStart) {
+        return easeIn((x - sustainStart) / sustainStart);
+    }
+    if (x >= sustainEnd) {
+        return 1 - easeOut((x - sustainEnd) / (1 - sustainEnd));
+    }
+    return 1;
+}
+
+function easeIn(x) {
+    return x * x;
+}
+
+function easeOut(x) {
+    return 1 - easeIn(1 - x);
+}
+
+class World {
+    #container;
+    #prevFrameTime = 0;
+    renderer;
+
+    constructor(container) {
+        this.#container = container;
+        this.renderer = new Renderer(this, this.#container);
+        this.physics = new Physics(this);
+        this.#resize();
+        window.addEventListener("resize", () => this.#resize());
+        this.#prevFrameTime = performance.now();
+        this.#update();
+    }
+
+    #resize() {
+        this.renderer.resize();
+        this.physics.resize();
+    }
+
+    #update() {
+        const now = performance.now();
+        const deltaTime = now - this.#prevFrameTime;
+
+        this.physics.update(deltaTime);
+        this.renderer.update(deltaTime);
+
+        this.#prevFrameTime = now;
+        window.requestAnimationFrame(() => this.#update());
+    }
+}
+
+new World(document.body);
+    </script>
+</body>
+</html>
